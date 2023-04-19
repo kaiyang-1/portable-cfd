@@ -1,6 +1,5 @@
 //! Solves weakly compressible Navier-Stokes equations in 2D, see the README.
 
-#include <cartesian_product.hpp> // Brings C++23 std::views::cartesian_product to C++20
 #include <cassert>
 #include <chrono>
 #include <fstream>
@@ -11,6 +10,7 @@
 #include <algorithm> // For std::fill_n
 #include <execution> // For std::execution::par
 #include <numeric>   // For std::transform_reduce
+#include <ranges>    // For std::views
 
 // Problem parameters
 struct parameters {
@@ -99,10 +99,8 @@ int main(int argc, char *argv[]) {
     auto time = std::chrono::duration<double>(clk_t::now() - start).count();
     auto grid_size = static_cast<double>(p.nx * p.ny * sizeof(double) * 2) * 1e-9; // GB
     auto memory_bw = grid_size * static_cast<double>(p.nit()) / time;              // GB/s
-    if (p.rank == 0) {
-        std::cerr << "Domain " << p.nx << "x" << p.ny << " (" << grid_size << " GB): " << memory_bw
-                  << " GB/s" << std::endl;
-    }
+    std::cerr << "Domain " << p.nx << "x" << p.ny << " (" << grid_size << " GB): " << memory_bw
+              << " GB/s" << std::endl;
 
     return 0;
 }
