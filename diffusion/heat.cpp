@@ -37,7 +37,7 @@ struct parameters {
 
 float stencil(float *u_new, float *u_old, long x, long y, parameters p);
 
-void write_to_csv(float *u, parameters p, string filename);
+void write_to_csv(float *u, parameters p, std::string filename);
 
 // 2D grid of indicies
 struct grid {
@@ -89,10 +89,10 @@ int main(int argc, char *argv[]) {
     }
 
     auto time = std::chrono::duration<float>(clk_t::now() - start).count();
-    auto grid_size = static_cast<float>(p.nx * p.ny * sizeof(float) * 2) * 1e-9; // GB
-    auto memory_bw = grid_size * static_cast<float>(p.nit()) / time;             // GB/s
+    auto grid_size = static_cast<float>(p.nx * p.ny) * 1e-6; // cells
+    auto mcups = grid_size * static_cast<float>(p.nit()) / time; // cell update per second
     std::cerr << "Local domain " << p.nx << "x" << p.ny << " (" << grid_size
-              << " GB): " << memory_bw << " GB/s" << std::endl;
+              << " million cells): " << mcups << " MCUPS" << std::endl;
 
     write_to_csv(u_old.data(), p, "heat_data.csv");
 
@@ -150,13 +150,13 @@ float inner(float *u_new, float *u_old, parameters p) {
     return apply_stencil(u_new, u_old, g, p);
 }
 
-void write_to_csv(float *u, parameters p, string filename) {
+void write_to_csv(float *u, parameters p, std::string filename) {
     auto idx = [=](auto x, auto y) {
         // Index into the memory using row-major order:
         return y * (p.nx + p.halo) + x;
     };
 
-    ofstream file(filename);
+    std::ofstream file(filename);
 
     for (int j = 0; j < p.ny; j++) {
         for (int i = 0; i < p.nx; i++) {
@@ -165,7 +165,7 @@ void write_to_csv(float *u, parameters p, string filename) {
             }
             file << u[idx(i + p.halo / 2, j + p.halo / 2)];
         }
-        file << endl;
+        file << std::endl;
     }
 
     file.close();
