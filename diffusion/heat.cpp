@@ -37,6 +37,8 @@ struct parameters {
 
 float stencil(float *u_new, float *u_old, long x, long y, parameters p);
 
+void write_to_csv(float *u, parameters p, string filename);
+
 // 2D grid of indicies
 struct grid {
     long x_begin, x_end, y_begin, y_end;
@@ -91,6 +93,10 @@ int main(int argc, char *argv[]) {
     auto memory_bw = grid_size * static_cast<float>(p.nit()) / time;             // GB/s
     std::cerr << "Local domain " << p.nx << "x" << p.ny << " (" << grid_size
               << " GB): " << memory_bw << " GB/s" << std::endl;
+
+    write_to_csv(u_old.data(), p, "heat_data.csv");
+
+    return 0;
 }
 
 // Reads command line arguments to initialize problem size
@@ -142,4 +148,25 @@ float inner(float *u_new, float *u_old, parameters p) {
            .y_begin = p.halo / 2,
            .y_end = p.ny + p.halo / 2};
     return apply_stencil(u_new, u_old, g, p);
+}
+
+void write_to_csv(float *u, parameters p, string filename) {
+    auto idx = [=](auto x, auto y) {
+        // Index into the memory using row-major order:
+        return y * (p.nx + p.halo) + x;
+    };
+
+    ofstream file(filename);
+
+    for (int j = 0; j < p.ny; j++) {
+        for (int i = 0; i < p.nx; i++) {
+            if (i != 0) {
+                file << ",";
+            }
+            file << u[idx(i + p.halo / 2, j + p.halo / 2)];
+        }
+        file << endl;
+    }
+
+    file.close();
 }
