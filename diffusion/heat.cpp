@@ -1,5 +1,6 @@
 //! Solves heat equation in 2D, see the README.
 
+#include "../include/cartesian_product.hpp"
 #include <cassert>
 #include <chrono>
 #include <fstream>
@@ -7,7 +8,7 @@
 #include <vector>
 // DONE: add C++ standard library includes as necessary
 #include <algorithm> // For std::fill_n
-#include <ranges>    // For std::views
+// #include <ranges>    // For std::views
 #include <execution> // For std::execution::par
 #include <numeric>   // For std::transform_reduce
 
