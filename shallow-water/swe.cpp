@@ -2,7 +2,6 @@
 
 #include "../include/cartesian_product.hpp"
 #include "../include/scheme.hpp"
-#include <cassert>
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -175,13 +174,15 @@ void initial_condition(float *h, float *u, float *v, parameters p, float init_h)
 
         float wx = (i - p.halo / 2 + 0.5f) * p.dx;
         float wy = (j - p.halo / 2 + 0.5f) * p.dx;
-
+        /*
         float radius = 0.1 * p.Lx;
         float dis = std::sqrt((wx - 0.5f * p.Lx) * (wx - 0.5f * p.Lx) +
                               (wy - 0.5f * p.Ly) * (wy - 0.5f * p.Ly));
-
         if (dis <= radius) {
             h[idx(i, j)] = init_h * std::cos(dis / radius * 0.5f * M_PI);
+        */
+        if (wx < 0.2 * p.Lx && wy < 0.2 * p.Ly) {
+            h[idx(i, j)] = init_h;
         } else
             h[idx(i, j)] = 0;
     });
@@ -391,13 +392,12 @@ int main(int argc, char *argv[]) {
         float h_max =
             solve_height(h_old.data(), h_new.data(), h_rk.data(), u_old.data(), v_old.data(), p);
         float v_max = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
-                                      u_rk.data(), v_rk.data(), h_old.data(), p);
+                                     u_rk.data(), v_rk.data(), h_old.data(), p);
 
         // output data
         if (uint(Tsim / p.Tout()) >= output) {
-            std::cout << "Time = " << Tsim << " [sec], steps = " << i
-                      << ", max vel = " << v_max << ", max height = " << h_max
-                      << std::endl;
+            std::cout << "Time = " << Tsim << " [sec], steps = " << i << ", max vel = " << v_max
+                      << ", max height = " << h_max << std::endl;
 
             std::string filename = "height_" + std::to_string(output) + ".csv";
             write_to_csv(h_old.data(), p, filename);
