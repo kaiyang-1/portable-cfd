@@ -1,29 +1,29 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-# 读取CSV文件中的数据
+# Load data from CSV file
 data = np.loadtxt('heat_data.csv', delimiter=',')
 
-# 获取行列数
+# Get the number of rows and columns
 rows, cols = data.shape
 
-# 设置网格大小
-dh = 1 / rows
+# Set the grid size
+dh = 1 / cols
 x = np.arange(0, cols, 1) * dh + 0.5*dh
 y = np.arange(0, rows, 1) * dh + 0.5*dh
 
-# 创建网格
+# Create the grid
 X, Y = np.meshgrid(x, y)
 
-# 绘制热力图
+# Plot the heatmap
 plt.pcolormesh(X, Y, data, clim=[0, 1])
 
-# 添加颜色条
+# Add a colorbar
 plt.colorbar()
 
-# 设置坐标轴标签
+# Set the axis labels
 plt.xlabel('x')
 plt.ylabel('y')
 
-# 显示图像
+# Show the plot
 plt.show()
