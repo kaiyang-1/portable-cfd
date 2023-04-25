@@ -176,9 +176,13 @@ void initial_condition(float *h, float *u, float *v, parameters p, float init_h)
         float wx = (i - p.halo / 2 + 0.5f) * p.dx;
         float wy = (j - p.halo / 2 + 0.5f) * p.dx;
 
-        if (wx < 0.2f * p.Lx && wy < 0.2f * p.Ly)
-            h[idx(i, j)] = init_h;
-        else
+        float radius = 0.1 * p.Lx;
+        float dis = std::sqrt((wx - 0.5f * p.Lx) * (wx - 0.5f * p.Lx) +
+                              (wy - 0.5f * p.Ly) * (wy - 0.5f * p.Ly));
+
+        if (dis <= radius) {
+            h[idx(i, j)] = init_h * std::cos(dis / radius * 0.5f * M_PI);
+        } else
             h[idx(i, j)] = 0;
     });
 
@@ -288,7 +292,7 @@ float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, f
     auto ys = std::views::iota(g.y_begin, g.y_end);
     auto ids = std::views::cartesian_product(xs, ys);
 
-    float max_vel2 = std::transform_reduce(
+    float max_vel = std::transform_reduce(
         std::execution::par, ids.begin(), ids.end(), std::numeric_limits<float>::min(),
         [](auto a, auto b) { return std::max(a, b); },
         [u_new, v_new, u_old, v_old, u_n, v_n, h, p, c0, c1](auto gid) {
@@ -312,7 +316,7 @@ float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, f
             adv_term += v_adv * scheme::HJ_WENO3(u_old[idx(i, j - upwind)], u_old[idx(i, j)],
                                                  u_old[idx(i, j + upwind)],
                                                  u_old[idx(i, j + 2 * upwind)], v_adv, p.dx);
-            grad_term = p.gravity * (h[idx(i + 1, j)] - h[idx(i - 1, j)]) / (2.f * p.dx);
+            grad_term = p.gravity * (h[idx(i, j)] - h[idx(i - 1, j)]) / p.dx;
 
             u_new[idx(i, j)] =
                 c0 * u_n[idx(i, j)] + c1 * (u_old[idx(i, j)] - (adv_term + grad_term) * p.dt);
@@ -331,35 +335,35 @@ float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, f
             adv_term += v_adv * scheme::HJ_WENO3(v_old[idx(i, j - upwind)], v_old[idx(i, j)],
                                                  v_old[idx(i, j + upwind)],
                                                  v_old[idx(i, j + 2 * upwind)], v_adv, p.dx);
-            grad_term = p.gravity * (h[idx(i, j + 1)] - h[idx(i, j - 1)]) / (2.f * p.dx);
+            grad_term = p.gravity * (h[idx(i, j)] - h[idx(i, j - 1)]) / p.dx;
 
             v_new[idx(i, j)] =
                 c0 * v_n[idx(i, j)] + c1 * (v_old[idx(i, j)] - (adv_term + grad_term) * p.dt);
 
-            return u_new[idx(i, j)] * u_new[idx(i, j)] + v_new[idx(i, j)] * v_new[idx(i, j)];
+            return std::abs(u_new[idx(i, j)]) + std::abs(v_new[idx(i, j)]);
         });
 
-    return max_vel2;
+    return max_vel;
 }
 
 float solve_momentum(float *u_old, float *v_old, float *u_new, float *v_new, float *u_rk,
                      float *v_rk, float *h, parameters p) {
-    float max_vel2;
+    float max_vel;
 
     // 3rd-order 3-stage TVD Runge-Kutta method
     // 1st stage u_old, v_old --> u_new, v_new
-    max_vel2 = momentum_stencil(u_new, v_new, u_old, v_old, u_old, v_old, h, p, 0.f, 1.f);
+    max_vel = momentum_stencil(u_new, v_new, u_old, v_old, u_old, v_old, h, p, 0.f, 1.f);
     boundary_velocity(u_new, v_new, p);
 
     // 2nd stage u_new, v_new --> u_rk, v_rk
-    max_vel2 = momentum_stencil(u_rk, v_rk, u_new, v_new, u_old, v_old, h, p, 3.f / 4.f, 1.f / 4.f);
+    max_vel = momentum_stencil(u_rk, v_rk, u_new, v_new, u_old, v_old, h, p, 3.f / 4.f, 1.f / 4.f);
     boundary_velocity(u_rk, v_rk, p);
 
     // 3rd stage u_rk, v_rk --> u_new, v_new
-    max_vel2 = momentum_stencil(u_new, v_new, u_rk, v_rk, u_old, v_old, h, p, 1.f / 3.f, 2.f / 3.f);
+    max_vel = momentum_stencil(u_new, v_new, u_rk, v_rk, u_old, v_old, h, p, 1.f / 3.f, 2.f / 3.f);
     boundary_velocity(u_new, v_new, p);
 
-    return max_vel2;
+    return max_vel;
 }
 
 void write_to_csv(float *u, parameters p, std::string filename);
@@ -368,8 +372,8 @@ int main(int argc, char *argv[]) {
     // Parse CLI parameters
     parameters p(argc, argv);
 
-    const float CFL = 0.5;
-    const float init_h = 10.f;
+    const float CFL = 0.3;
+    const float init_h = 0.5;
 
     // Allocate memory
     std::vector<float> h_old(p.n()), h_new(p.n()), h_rk(p.n());
@@ -386,13 +390,13 @@ int main(int argc, char *argv[]) {
     for (uint i = 0; Tsim <= p.Tend; ++i) {
         float h_max =
             solve_height(h_old.data(), h_new.data(), h_rk.data(), u_old.data(), v_old.data(), p);
-        float v2_max = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
+        float v_max = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
                                       u_rk.data(), v_rk.data(), h_old.data(), p);
 
         // output data
         if (uint(Tsim / p.Tout()) >= output) {
-            std::cerr << "Time = " << Tsim << " [sec], steps = " << i
-                      << ", max vel = " << std::sqrt(v2_max) << ", max height = " << h_max
+            std::cout << "Time = " << Tsim << " [sec], steps = " << i
+                      << ", max vel = " << v_max << ", max height = " << h_max
                       << std::endl;
 
             std::string filename = "height_" + std::to_string(output) + ".csv";
@@ -407,7 +411,7 @@ int main(int argc, char *argv[]) {
 
         Tsim += p.dt;
 
-        p.dt = CFL * p.dx / (std::sqrt(v2_max) + std::sqrt(p.gravity * h_max));
+        p.dt = CFL * p.dx / (v_max + std::sqrt(p.gravity * h_max));
     }
 
     return 0;
