@@ -242,8 +242,8 @@ float height_integral(float *h_new, float *h_old, float *h_n, float *flx, float 
             auto [i, j] = gid;
 
             h_new[idx(i, j)] = c0 * h_n[idx(i, j)] +
-                               c1 * (h_old[idx(i, j)] + (flx[idx(i + 1, j)] - flx[idx(i, j)] +
-                                                         fly[idx(i, j + 1)] - fly[idx(i, j)]) /
+                               c1 * (h_old[idx(i, j)] + (flx[idx(i, j)] - flx[idx(i + 1, j)] +
+                                                         fly[idx(i, j)] - fly[idx(i, j + 1)]) /
                                                             p.dx * p.dt);
 
             return h_new[idx(i, j)];
