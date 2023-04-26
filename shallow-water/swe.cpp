@@ -373,7 +373,7 @@ int main(int argc, char *argv[]) {
     // Parse CLI parameters
     parameters p(argc, argv);
 
-    const float CFL = 0.3;
+    const float CFL = 0.8;
     const float init_h = 0.5;
 
     // Allocate memory
@@ -392,7 +392,7 @@ int main(int argc, char *argv[]) {
         float h_max =
             solve_height(h_old.data(), h_new.data(), h_rk.data(), u_old.data(), v_old.data(), p);
         float v_max = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
-                                     u_rk.data(), v_rk.data(), h_old.data(), p);
+                                     u_rk.data(), v_rk.data(), h_new.data(), p);
 
         // output data
         if (uint(Tsim / p.Tout()) >= output) {
