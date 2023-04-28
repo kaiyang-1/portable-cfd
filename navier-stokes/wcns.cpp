@@ -194,7 +194,8 @@ void pressure_stencil(float *p_old, float *p_new, float *div_u, const float rho,
                   });
 }
 
-void pressure_evolution(float *p_old, float *p_new, float *u, float *v, parameters par) {
+void pressure_evolution(std::vector<float> &p_old, std::vector<float> &p_new, float *u, float *v,
+                        parameters par) {
     std::vector<float> div_u(par.n());
     constexpr float rho = 1;
 
@@ -216,19 +217,21 @@ void pressure_evolution(float *p_old, float *p_new, float *u, float *v, paramete
                 (u[idx(i + 1, j)] - u[idx(i, j)] + v[idx(i, j + 1)] - v[idx(i, j)]) / par.dx;
         });
 
-    for (int iter = 0; iter < 20; iter++) {
-        pressure_stencil(p_old, p_new, div_u.data(), rho, par);
-        boundary_pressure(p_new, par);
-        std::swap(p_new, p_old);
+    for (int iter = 0; iter < 20; ++iter) {
+        pressure_stencil(p_old.data(), p_new.data(), div_u.data(), rho, par);
+        boundary_pressure(p_new.data(), par);
+        std::swap(p_old, p_new);
     }
 
-    std::for_each(std::execution::par, ids.begin(), ids.end(), [u, v, p_old, par, rho](auto gid) {
-        auto idx = [=](auto i, auto j) { return j * (par.nx + par.halo) + i; };
-        auto [i, j] = gid;
+    std::for_each(std::execution::par, ids.begin(), ids.end(),
+                  [u, v, p = p_old.data(), par, rho](auto gid) {
+                      auto idx = [=](auto i, auto j) { return j * (par.nx + par.halo) + i; };
+                      auto [i, j] = gid;
 
-        u[idx(i, j)] -= (p_old[idx(i, j)] - p_old[idx(i - 1, j)]) / par.dx * par.dt / rho;
-        v[idx(i, j)] -= (p_old[idx(i, j)] - p_old[idx(i, j - 1)]) / par.dx * par.dt / rho;
-    });
+                      u[idx(i, j)] -= (p[idx(i, j)] - p[idx(i - 1, j)]) / par.dx * par.dt / rho;
+                      v[idx(i, j)] -= (p[idx(i, j)] - p[idx(i, j - 1)]) / par.dx * par.dt / rho;
+                  });
+    boundary_velocity(u, v, par);
 }
 
 float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, float *u_n,
@@ -321,9 +324,6 @@ float solve_momentum(float *u_old, float *v_old, float *u_new, float *v_new, flo
     max_vel = momentum_stencil(u_new, v_new, u_rk, v_rk, u_old, v_old, par, 1.f / 3.f, 2.f / 3.f);
     boundary_velocity(u_new, v_new, par);
 
-    std::swap(u_new, u_old);
-    std::swap(v_new, v_old);
-
     return max_vel;
 }
 
@@ -333,7 +333,7 @@ int main(int argc, char *argv[]) {
     // Parse CLI parameters
     parameters par(argc, argv);
 
-    const float CFL = 0.8;
+    const float CFL = 0.4;
 
     // Allocate memory
     std::vector<float> p_old(par.n()), p_new(par.n());
@@ -341,19 +341,24 @@ int main(int argc, char *argv[]) {
     std::vector<float> v_old(par.n()), v_new(par.n()), v_rk(par.n());
 
     initial_condition(p_old.data(), u_old.data(), v_old.data(), par);
+    par.Cs = 1 / par.Ma;
     par.dt = CFL * par.Ma * par.dx;
 
     // main loop
     for (uint it = 0; it < par.nit(); ++it) {
-        float v_max = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
-                                     u_rk.data(), v_rk.data(), par);
-        pressure_evolution(p_old.data(), p_new.data(), u_old.data(), v_old.data(), par);
+        float max_vel = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
+                                       u_rk.data(), v_rk.data(), par);
+        pressure_evolution(p_old, p_new, u_new.data(), v_new.data(), par);
 
         if (it % par.nout() == 0) {
-            std::cout << "Steps = " << it << ", max vel = " << v_max << std::endl;
+            std::cout << "Steps = " << it << ", max vel = " << max_vel << std::endl;
         }
 
-        par.dt = CFL * par.Ma * par.dx / v_max;
+        std::swap(u_new, u_old);
+        std::swap(v_new, v_old);
+
+        // par.Cs = max_vel / par.Ma;
+        // par.dt = CFL * par.Ma * par.dx / max_vel;
     }
 
     write_to_csv(u_old.data(), v_old.data(), par, "cavity_flow.csv");
