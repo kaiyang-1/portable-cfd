@@ -167,7 +167,7 @@ void initial_condition(float *p, float *u, float *v, parameters par) {
     std::fill_n(std::execution::par, v, par.n(), 0.0);
 }
 
-float pressure_stencil(float *p_old, float *p_new, float *div_u, parameters par) {
+void pressure_stencil(float *p_old, float *p_new, float *div_u, parameters par) {
     grid g{.x_begin = par.halo / 2,
            .x_end = par.nx + par.halo / 2,
            .y_begin = par.halo / 2,
@@ -176,9 +176,29 @@ float pressure_stencil(float *p_old, float *p_new, float *div_u, parameters par)
     auto xs = std::views::iota(g.x_begin, g.x_end);
     auto ys = std::views::iota(g.y_begin, g.y_end);
     auto ids = std::views::cartesian_product(xs, ys);
+
+    constexpr float rho = 1;
+
+    std::for_each(std::execution::par, ids.begin(), ids.end(),
+                  [p_old, p_new, div_u, par, rho](auto gid) {
+                      auto idx = [=](auto i, auto j) { return j * (par.nx + par.halo) + i; };
+                      auto [i, j] = gid;
+
+                      p_new[idx(i, j)] =
+                          p_old[idx(i, j)] -
+                          par.dt * rho * par.Cs * par.Cs *
+                              (div_u[idx(i, j)] -
+                               (scheme::central_diff_2nd(p_old[idx(i - 1, j)], p_old[idx(i, j)],
+                                                         p_old[idx(i + 1, j)], par.dx) +
+                                scheme::central_diff_2nd(p_old[idx(i, j - 1)], p_old[idx(i, j)],
+                                                         p_old[idx(i, j + 1)], par.dx)) *
+                                   par.dt);
+                  });
+
+    std::swap(p_old, p_new);
 }
 
-float pressure_evolution(float *p_old, float *p_new, float *u, float *v, parameters par) {}
+void pressure_evolution(float *p_old, float *p_new, float *u, float *v, parameters par) {}
 
 float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, float *u_n,
                        float *v_n, parameters par, float c0, float c1) {
@@ -269,7 +289,7 @@ float solve_momentum(float *u_old, float *v_old, float *u_new, float *v_new, flo
     return max_vel;
 }
 
-void write_to_csv(float *u, parameters par, std::string filename);
+void write_to_csv(float *u, float *v, parameters par, std::string filename);
 
 int main(int argc, char *argv[]) {
     // Parse CLI parameters
@@ -304,17 +324,19 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void write_to_csv(float *u, parameters par, std::string filename) {
+void write_to_csv(float *u, float *v, parameters par, std::string filename) {
     auto idx = [=](auto x, auto y) { return y * (par.nx + par.halo) + x; };
 
     std::ofstream file(filename);
 
-    for (int j = 0; j < par.ny; j++) {
-        for (int i = 0; i < par.nx; i++) {
-            if (i != 0) {
+    for (int j = par.halo / 2; j < par.ny + par.halo / 2; j++) {
+        for (int i = par.halo / 2; i < par.nx + par.halo / 2; i++) {
+            if (i != par.halo / 2) {
                 file << ",";
             }
-            file << h[idx(i + par.halo / 2, j + par.halo / 2)];
+            float u_c = 0.5 * (u[idx(i, j)] + u[idx(i + 1, j)]);
+            float v_c = 0.5 * (v[idx(i, j)] + v[idx(i, j + 1)]);
+            file << std::sqrt(u_c * u_c + v_c * v_c);
         }
         file << std::endl;
     }
