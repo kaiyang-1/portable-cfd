@@ -167,7 +167,7 @@ void initial_condition(float *p, float *u, float *v, parameters par) {
     std::fill_n(std::execution::par, v, par.n(), 0.0);
 }
 
-void pressure_stencil(float *p_old, float *p_new, float *div_u, parameters par) {
+void pressure_stencil(float *p_old, float *p_new, float *div_u, const float rho, parameters par) {
     grid g{.x_begin = par.halo / 2,
            .x_end = par.nx + par.halo / 2,
            .y_begin = par.halo / 2,
@@ -176,8 +176,6 @@ void pressure_stencil(float *p_old, float *p_new, float *div_u, parameters par) 
     auto xs = std::views::iota(g.x_begin, g.x_end);
     auto ys = std::views::iota(g.y_begin, g.y_end);
     auto ids = std::views::cartesian_product(xs, ys);
-
-    constexpr float rho = 1;
 
     std::for_each(std::execution::par, ids.begin(), ids.end(),
                   [p_old, p_new, div_u, par, rho](auto gid) {
@@ -191,14 +189,47 @@ void pressure_stencil(float *p_old, float *p_new, float *div_u, parameters par) 
                                (scheme::central_diff_2nd(p_old[idx(i - 1, j)], p_old[idx(i, j)],
                                                          p_old[idx(i + 1, j)], par.dx) +
                                 scheme::central_diff_2nd(p_old[idx(i, j - 1)], p_old[idx(i, j)],
-                                                         p_old[idx(i, j + 1)], par.dx)) *
-                                   par.dt);
+                                                         p_old[idx(i, j + 1)], par.dx)) /
+                                   rho * par.dt);
                   });
-
-    std::swap(p_old, p_new);
 }
 
-void pressure_evolution(float *p_old, float *p_new, float *u, float *v, parameters par) {}
+void pressure_evolution(float *p_old, float *p_new, float *u, float *v, parameters par) {
+    std::vector<float> div_u(par.n());
+    constexpr float rho = 1;
+
+    grid g{.x_begin = par.halo / 2,
+           .x_end = par.nx + par.halo / 2,
+           .y_begin = par.halo / 2,
+           .y_end = par.ny + par.halo / 2};
+
+    auto xs = std::views::iota(g.x_begin, g.x_end);
+    auto ys = std::views::iota(g.y_begin, g.y_end);
+    auto ids = std::views::cartesian_product(xs, ys);
+
+    std::for_each(
+        std::execution::par, ids.begin(), ids.end(), [div_u = div_u.data(), u, v, par](auto gid) {
+            auto idx = [=](auto i, auto j) { return j * (par.nx + par.halo) + i; };
+            auto [i, j] = gid;
+
+            div_u[idx(i, j)] =
+                (u[idx(i + 1, j)] - u[idx(i, j)] + v[idx(i, j + 1)] - v[idx(i, j)]) / par.dx;
+        });
+
+    for (int iter = 0; iter < 20; iter++) {
+        pressure_stencil(p_old, p_new, div_u.data(), rho, par);
+        boundary_pressure(p_new, par);
+        std::swap(p_new, p_old);
+    }
+
+    std::for_each(std::execution::par, ids.begin(), ids.end(), [u, v, p_old, par, rho](auto gid) {
+        auto idx = [=](auto i, auto j) { return j * (par.nx + par.halo) + i; };
+        auto [i, j] = gid;
+
+        u[idx(i, j)] -= (p_old[idx(i, j)] - p_old[idx(i - 1, j)]) / par.dx * par.dt / rho;
+        v[idx(i, j)] -= (p_old[idx(i, j)] - p_old[idx(i, j - 1)]) / par.dx * par.dt / rho;
+    });
+}
 
 float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, float *u_n,
                        float *v_n, parameters par, float c0, float c1) {
@@ -235,8 +266,10 @@ float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, f
             adv_term += v_adv * scheme::HJ_WENO3(u_old[idx(i, j - upwind)], u_old[idx(i, j)],
                                                  u_old[idx(i, j + upwind)],
                                                  u_old[idx(i, j + 2 * upwind)], v_adv, par.dx);
-            visc_term = scheme::central_diff_2nd(u_old[idx(i - 1, j)], u_old[idx(i, j)],
-                                                 u_old[idx(i + 1, j)], par.dx) /
+            visc_term = (scheme::central_diff_2nd(u_old[idx(i - 1, j)], u_old[idx(i, j)],
+                                                  u_old[idx(i + 1, j)], par.dx) +
+                         scheme::central_diff_2nd(u_old[idx(i, j - 1)], u_old[idx(i, j)],
+                                                  u_old[idx(i, j + 1)], par.dx)) /
                         par.Re;
 
             u_new[idx(i, j)] =
@@ -256,8 +289,10 @@ float momentum_stencil(float *u_new, float *v_new, float *u_old, float *v_old, f
             adv_term += v_adv * scheme::HJ_WENO3(v_old[idx(i, j - upwind)], v_old[idx(i, j)],
                                                  v_old[idx(i, j + upwind)],
                                                  v_old[idx(i, j + 2 * upwind)], v_adv, par.dx);
-            visc_term = scheme::central_diff_2nd(u_old[idx(i, j - 1)], u_old[idx(i, j)],
-                                                 u_old[idx(i, j + 1)], par.dx) /
+            visc_term = (scheme::central_diff_2nd(v_old[idx(i - 1, j)], v_old[idx(i, j)],
+                                                  v_old[idx(i + 1, j)], par.dx) +
+                         scheme::central_diff_2nd(v_old[idx(i, j - 1)], v_old[idx(i, j)],
+                                                  v_old[idx(i, j + 1)], par.dx)) /
                         par.Re;
 
             v_new[idx(i, j)] =
@@ -286,6 +321,9 @@ float solve_momentum(float *u_old, float *v_old, float *u_new, float *v_new, flo
     max_vel = momentum_stencil(u_new, v_new, u_rk, v_rk, u_old, v_old, par, 1.f / 3.f, 2.f / 3.f);
     boundary_velocity(u_new, v_new, par);
 
+    std::swap(u_new, u_old);
+    std::swap(v_new, v_old);
+
     return max_vel;
 }
 
@@ -309,17 +347,16 @@ int main(int argc, char *argv[]) {
     for (uint it = 0; it < par.nit(); ++it) {
         float v_max = solve_momentum(u_old.data(), v_old.data(), u_new.data(), v_new.data(),
                                      u_rk.data(), v_rk.data(), par);
+        pressure_evolution(p_old.data(), p_new.data(), u_old.data(), v_old.data(), par);
 
-        // output data
         if (it % par.nout() == 0) {
             std::cout << "Steps = " << it << ", max vel = " << v_max << std::endl;
         }
 
-        std::swap(u_new, u_old);
-        std::swap(v_new, v_old);
-
         par.dt = CFL * par.Ma * par.dx / v_max;
     }
+
+    write_to_csv(u_old.data(), v_old.data(), par, "cavity_flow.csv");
 
     return 0;
 }
